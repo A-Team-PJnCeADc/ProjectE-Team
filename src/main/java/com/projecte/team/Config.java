@@ -1,4 +1,4 @@
-package com.myname.mymodid;
+package com.projecte.team;
 
 import java.io.File;
 
