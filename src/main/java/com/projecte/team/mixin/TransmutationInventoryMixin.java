@@ -14,8 +14,9 @@ import moze_intel.projecte.gameObjs.container.inventory.TransmutationInventory;
 
 /**
  * 转化桌 EMC 实时提交:ProjectE 的 addEmc/removeEmc 是玩家 EMC 变化的唯一写入口
- * (容器操作时立即修改内存,关闭 GUI 才提交)。在方法尾部把增量实时转发到团队池
- * 并广播全队,使成员不关闭 GUI 也能立即看到队友的 EMC 变化。
+ * (容器操作时立即修改内存,关闭 GUI 才提交)。在方法尾部把增量实时转发到团队池,
+ * 再由 TeamManager 通过轻量 TeamEmcPKT 网络包即时广播全队,使成员不关闭 GUI
+ * 也能立即看到队友的 EMC 变化(绝对覆盖,幂等)。
  * 客户端(EntityPlayerSP)也走这些方法,但通过 worldObj.isRemote 跳过,不重复提交。
  */
 @Mixin(TransmutationInventory.class)

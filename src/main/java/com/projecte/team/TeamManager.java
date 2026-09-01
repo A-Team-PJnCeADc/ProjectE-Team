@@ -1,12 +1,13 @@
 package com.projecte.team;
 
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.item.ItemStack;
+import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.nbt.NBTTagList;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.util.ChatComponentTranslation;
 import net.minecraft.world.WorldServer;
@@ -16,12 +17,15 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import com.google.common.collect.Lists;
-import com.google.common.collect.Sets;
+import com.projecte.team.network.PacketHandler;
+import com.projecte.team.network.TeamEmcPKT;
+import com.projecte.team.network.TeamKnowledgePKT;
 
 import moze_intel.projecte.gameObjs.container.TransmutationContainer;
 import moze_intel.projecte.gameObjs.container.inventory.TransmutationInventory;
 import moze_intel.projecte.playerData.Transmutation;
 import moze_intel.projecte.playerData.TransmutationProps;
+import moze_intel.projecte.utils.Constants;
 
 /**
  * 团队系统核心:团队 CRUD、EMC/知识共享代理、数据同步。
@@ -87,13 +91,15 @@ public final class TeamManager {
     /**
      * Mixin 钩子(TransmutationInventoryMixin):转化桌 EMC 增加时实时转发到团队池。
      * 仅在服务端被调用(客户端已由 Mixin 内 isRemote 判断跳过)。
+     * 上限与 ProjectE 容器一致钳制在 TILE_MAX_EMC:否则团队池可超上限,
+     * 对齐成员容器后 hasMaxedEmc() 为真会阻止 shift-click 存入。
      */
     public static void onEmcAdd(EntityPlayer player, double value) {
         TeamData team = getTeam(player);
         if (team != null && team.isShareEMC()) {
-            team.setEmc(Math.max(0, team.getEmc() + value));
+            team.setEmc(Math.min(Constants.TILE_MAX_EMC, Math.max(0, team.getEmc() + value)));
             markDirty();
-            syncTeam(team);
+            syncTeamEmc(team);
         }
     }
 
@@ -106,7 +112,7 @@ public final class TeamManager {
         if (team != null && team.isShareEMC()) {
             team.setEmc(Math.max(0, team.getEmc() - value));
             markDirty();
-            syncTeam(team);
+            syncTeamEmc(team);
         }
     }
 
@@ -121,12 +127,12 @@ public final class TeamManager {
             return;
         }
         if (team.isShareEMC()) {
-            syncTeam(team);
+            syncTeamEmc(team);
             return;
         }
         team.setEmc(Math.max(0, emc));
         markDirty();
-        syncTeam(team);
+        syncTeamEmc(team);
     }
 
     // 知识代理
@@ -161,7 +167,7 @@ public final class TeamManager {
 
     /**
      * 非共享模式玩家开着转化桌时,定期把容器 EMC 提交到个人 props。
-     * 背景:ProjectE 只在关闭 GUI(onContainerClosed → setEmc)时提交容器 EMC;
+     * 背景:ProjectE 只在关闭 GUI(onContainerClosed -> setEmc)时提交容器 EMC;
      * 玩家不关 GUI 直接退出游戏时容器未提交,EMC 丢失(重进为 0)。
      * 团队共享玩家由 mixin 实时写入团队池,退出不丢,不受影响;
      * 此处只补非共享玩家(独立玩家 / 团队未开共享)。
@@ -202,59 +208,58 @@ public final class TeamManager {
         }
     }
 
-    // ============ 延迟合并同步(知识等高频/批量写操作) ============
+    // 数据同步(自定义网络包,全服务端计算,客户端只接收应用)
 
-    private static final Set<UUID> pendingSyncTeams = Sets.newHashSet();
-
-    /** 标记团队需要在下一个同步周期向所有在线成员广播数据 */
-    static void markSyncNeeded(TeamData team) {
-        pendingSyncTeams.add(team.teamId);
+    /** 玩家生效的 EMC:共享则团队池,否则个人字段 */
+    private static double getEffectiveEmc(EntityPlayer player) {
+        if (isSharingEMC(player)) {
+            TeamData team = getTeam(player);
+            return team == null ? 0 : team.getEmc();
+        }
+        return Transmutation.getEmc(player);
     }
 
-    /** 由 TeamSaveHandler 周期调用:合并发送待同步团队的数据(避免批量写操作逐条广播) */
-    static void flushPendingSyncs() {
-        if (pendingSyncTeams.isEmpty()) {
-            return;
+    /** 玩家生效的知识:共享则团队池,否则个人字段 */
+    private static List<ItemStack> getEffectiveKnowledge(EntityPlayer player) {
+        if (isSharingKnowledge(player)) {
+            return getTeamKnowledge(player);
         }
-        TeamDataStore store = getStore();
-        if (store == null) {
-            return;
-        }
-        for (UUID teamId : pendingSyncTeams) {
-            TeamData team = store.getTeam(teamId);
-            if (team != null) {
-                syncTeam(team);
-            }
-        }
-        pendingSyncTeams.clear();
+        return Transmutation.getKnowledge(player);
     }
 
-    // 数据同步
+    /** 把生效知识打包成网络载荷(与 ProjectE saveForPacket 的 knowledge 段同构) */
+    private static NBTTagCompound buildKnowledgePayload(List<ItemStack> knowledge) {
+        NBTTagCompound compound = new NBTTagCompound();
+        NBTTagList knowledgeWrite = new NBTTagList();
+        for (ItemStack i : knowledge) {
+            NBTTagCompound tag = i.writeToNBT(new NBTTagCompound());
+            knowledgeWrite.appendTag(tag);
+        }
+        compound.setTag("knowledge", knowledgeWrite);
+        return compound;
+    }
 
-    /**
-     * 向团队所有在线成员同步生效数据(只发本队成员,绝不广播给其他队伍或独立玩家)。
-     * Transmutation.sync 读取 props.saveForPacket(),而成员身上是 TeamTransmutationProps,
-     * 其覆写的 saveForPacket 会自动打包团队 EMC/知识,因此这里无需区分团队/个人。
-     * 注意:owner 独立于 members 列表,二者都要枚举。
-     */
-    public static void syncTeam(TeamData team) {
+    /** EMC 变化时向全队推送(轻量包,绝对覆盖,幂等;addEmc/removeEmc 每笔操作即时触发) */
+    public static void syncTeamEmc(TeamData team) {
         if (team == null || MinecraftServer.getServer() == null) {
             return;
         }
-        syncToMember(team, team.getOwner());
+        syncEmcToMember(team, team.getOwner());
         for (UUID member : team.getMembers()) {
-            syncToMember(team, member);
+            syncEmcToMember(team, member);
         }
     }
 
-    /** 向单个在线成员发送其 props 同步包(离线成员跳过,上线时 ProjectE 登录同步会补齐) */
-    private static void syncToMember(TeamData team, UUID uuid) {
+    /**
+     * 向单个在线成员推送 EMC(离线成员跳过,登录时 ProjectE 的登录同步会补齐),并把它开着的
+     * 服务端容器 emc 对齐到团队池:否则队友烧毁的 EMC 进入团队池后,其他成员已开着的容器 emc
+     * 仍是打开时的旧快照,服务端 writeIntoOutputSlot/canTakeStack 校验会因 emc 不足拒绝取物品
+     * (表现为"只有放入者能取出")。共享 EMC 时容器 emc 的权威值就是团队池。
+     */
+    private static void syncEmcToMember(TeamData team, UUID uuid) {
         EntityPlayerMP player = getOnlinePlayer(uuid);
         if (player != null) {
-            Transmutation.sync(player);
-            // 对齐成员开着的转化桌容器 emc 到团队池:否则队友烧毁的 EMC 进入团队池后,
-            // 其他成员已开着的容器 emc 仍是打开时的旧快照,取物品时因 emc 不足取不出来
-            // (表现为"只有放入者能取出")。共享 EMC 时容器 emc 的权威值就是团队池。
+            PacketHandler.sendTo(player, new TeamEmcPKT(getEffectiveEmc(player)));
             if (team.isShareEMC() && player.openContainer instanceof TransmutationContainer) {
                 TransmutationInventory inv = ((TransmutationContainer) player.openContainer).transmutationInventory;
                 if (inv != null) {
@@ -262,6 +267,46 @@ public final class TeamManager {
                 }
             }
         }
+    }
+
+    /** 知识变化时向全队推送全量列表(由 PlayerKnowledgeChangeEvent 驱动,事件在变更完成后触发) */
+    public static void syncTeamKnowledge(TeamData team) {
+        if (team == null || MinecraftServer.getServer() == null) {
+            return;
+        }
+        syncKnowledgeToMember(team, team.getOwner());
+        for (UUID member : team.getMembers()) {
+            syncKnowledgeToMember(team, member);
+        }
+    }
+
+    private static void syncKnowledgeToMember(TeamData team, UUID uuid) {
+        EntityPlayerMP player = getOnlinePlayer(uuid);
+        if (player != null) {
+            PacketHandler.sendTo(player, new TeamKnowledgePKT(buildKnowledgePayload(getEffectiveKnowledge(player))));
+        }
+    }
+
+    /** 全量同步(模式切换/设置变更等低频事件):EMC + 知识一起推送 */
+    public static void syncTeam(TeamData team) {
+        syncTeamEmc(team);
+        syncTeamKnowledge(team);
+    }
+
+    /** 向单个玩家推送完整生效状态(加入/离开/创建等个人↔团队模式切换时用,替代旧 Transmutation.sync) */
+    private static void syncPlayerState(EntityPlayerMP player) {
+        PacketHandler.sendTo(player, new TeamEmcPKT(getEffectiveEmc(player)));
+        PacketHandler.sendTo(player, new TeamKnowledgePKT(buildKnowledgePayload(getEffectiveKnowledge(player))));
+    }
+
+    /**
+     * 玩家登录后主动推送一次当前生效状态(团队共享则团队池,否则个人字段)。
+     * 背景:ProjectE 的登录同步(onEntityJoinWorld → Transmutation.sync → saveForPacket)依赖
+     * 那一刻 isSharingEMC 的判断,任何时序偏差都会让客户端收到个人值;这里在 PlayerLoggedInEvent
+     * (实体入世界之后)再推一次,保证重进后显示的一定是团队池(或正确的个人值)。
+     */
+    public static void syncOnLogin(EntityPlayerMP player) {
+        syncPlayerState(player);
     }
 
     // 指令操作
@@ -297,8 +342,8 @@ public final class TeamManager {
             name = defaultTeamName(player);
         }
         TeamData team = store.createTeam(player.getUniqueID(), name.trim());
-        // 队长从个人模式切换到团队模式,立即同步刷新客户端显示
-        Transmutation.sync(player);
+        // 队长从个人模式切换到团队模式,立即推送团队生效状态刷新客户端显示
+        syncPlayerState(player);
         sendMessage(player, "pe.team.create.success", team.getDisplayName());
         return null;
     }
@@ -326,8 +371,8 @@ public final class TeamManager {
         TeamData team = store.getTeamForPlayer(sender.getUniqueID());
         if (team == null) {
             team = store.createTeam(sender.getUniqueID(), defaultTeamName(sender));
-            // 自动创建团队后同步队长(从个人模式切换到团队模式)
-            Transmutation.sync(sender);
+            // 自动创建团队后推送队长生效状态(从个人模式切换到团队模式)
+            syncPlayerState(sender);
             sendMessage(sender, "pe.team.invite.created", team.getDisplayName());
         } else if (!team.isOwner(sender.getUniqueID())) {
             return "pe.team.error.notowner";
@@ -355,7 +400,7 @@ public final class TeamManager {
 
         store.removePendingInvite(player.getUniqueID());
         store.addMember(team, player.getUniqueID());
-        Transmutation.sync(player);
+        syncPlayerState(player);
         sendMessage(player, "pe.team.notify.joined", getNameForUUID(team.getOwner()));
         sendMessageToTeam(team, "pe.team.notify.accepted", player.getCommandSenderName());
         return null;
@@ -406,7 +451,7 @@ public final class TeamManager {
 
         store.removeMember(team, target.getUniqueID());
         store.removePendingInvite(target.getUniqueID());
-        Transmutation.sync(target);
+        syncPlayerState(target);
         sendMessage(target, "pe.team.notify.kicked", sender.getCommandSenderName());
         return null;
     }
@@ -426,7 +471,7 @@ public final class TeamManager {
             if (team.getMembers()
                 .isEmpty()) {
                 store.deleteTeam(team);
-                Transmutation.sync(player);
+                syncPlayerState(player);
                 sendMessage(player, "pe.team.leave.disbanded");
             } else {
                 UUID newOwner = team.getMembers()
@@ -439,7 +484,7 @@ public final class TeamManager {
             }
         } else {
             store.removeMember(team, player.getUniqueID());
-            Transmutation.sync(player);
+            syncPlayerState(player);
             sendMessageToTeam(team, "pe.team.notify.left", player.getCommandSenderName());
         }
         return null;

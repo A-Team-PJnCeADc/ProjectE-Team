@@ -1,5 +1,7 @@
 package com.projecte.team;
 
+import net.minecraft.nbt.NBTTagCompound;
+
 import cpw.mods.fml.common.FMLCommonHandler;
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
 
@@ -12,9 +14,21 @@ public class ClientProxy extends CommonProxy {
     public void preInit(FMLPreInitializationEvent event) {
         super.preInit(event);
 
-        // 客户端 tick:让打开着的转化桌 GUI 跟随团队 EMC 实时刷新
+        // 客户端主线程 tick:应用网络包排队的团队数据(EMC/知识)
         FMLCommonHandler.instance()
             .bus()
             .register(new TeamClientHandler());
+    }
+
+    // 网络包入口:Netty IO 线程收到,只做 volatile 排队,主线程 tick 应用
+
+    @Override
+    public void handleTeamEmc(double emc) {
+        TeamClientSync.queueEmc(emc);
+    }
+
+    @Override
+    public void handleTeamKnowledge(NBTTagCompound nbt) {
+        TeamClientSync.queueKnowledge(nbt);
     }
 }

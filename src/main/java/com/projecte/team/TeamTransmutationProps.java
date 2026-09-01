@@ -16,8 +16,8 @@ import moze_intel.projecte.utils.ItemHelper;
  * 原理:ProjectE 所有 EMC/知识读写都通过 TransmutationProps.getDataFor(player)
  * 返回的实例上的虚方法完成(Transmutation.getEmc/setEmc/getKnowledge 等)。
  * 本类在玩家构造时抢先注册(事件优先级 HIGHEST),覆写这些方法:
- * - 服务端且玩家在队并开启共享 → 读写团队共享池
- * - 否则(客户端 / 非团队成员 / 共享关闭)→ 走父类(个人数据)
+ * - 服务端且玩家在队并开启共享 -> 读写团队共享池
+ * - 否则(客户端 / 非团队成员 / 共享关闭)-> 走父类(个人数据)
  * 玩家个人的字段数据在加入团队时保持原样(冻结),离开团队后自动还原。
  *
  * 关键坑(持久化键冲突):ProjectE 的 PlayerEvents.onConstruct 也会无条件 register
@@ -84,6 +84,20 @@ public class TeamTransmutationProps extends TransmutationProps {
             return compound;
         }
         return super.saveForPacket();
+    }
+
+    // 客户端专用写入(只应用服务端推来的权威值,不触发团队代理判断)
+
+    /** 客户端:写入个人 EMC 字段(绕过团队代理判断,super 直写) */
+    public void applyClientEmc(double emc) {
+        super.setTransmutationEmc(emc);
+    }
+
+    /** 客户端:写入个人知识列表(绕过团队代理判断,super 直写) */
+    public void applyClientKnowledge(List<ItemStack> knowledge) {
+        List<ItemStack> list = super.getKnowledge();
+        list.clear();
+        list.addAll(knowledge);
     }
 
     /**

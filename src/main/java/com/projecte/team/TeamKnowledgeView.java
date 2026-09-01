@@ -35,7 +35,6 @@ public class TeamKnowledgeView extends AbstractList<ItemStack> {
         ItemStack old = team.getKnowledge()
             .set(index, element);
         TeamManager.markDirty();
-        TeamManager.markSyncNeeded(team);
         return old;
     }
 
@@ -45,7 +44,6 @@ public class TeamKnowledgeView extends AbstractList<ItemStack> {
             .add(index, element);
         team.pruneDuplicateKnowledge();
         TeamManager.markDirty();
-        TeamManager.markSyncNeeded(team);
     }
 
     @Override
@@ -53,7 +51,6 @@ public class TeamKnowledgeView extends AbstractList<ItemStack> {
         ItemStack old = team.getKnowledge()
             .remove(index);
         TeamManager.markDirty();
-        TeamManager.markSyncNeeded(team);
         return old;
     }
 
@@ -62,7 +59,6 @@ public class TeamKnowledgeView extends AbstractList<ItemStack> {
         team.getKnowledge()
             .clear();
         TeamManager.markDirty();
-        TeamManager.markSyncNeeded(team);
     }
 
     @Override
@@ -99,7 +95,6 @@ public class TeamKnowledgeView extends AbstractList<ItemStack> {
             backing.remove();
             canRemove = false;
             TeamManager.markDirty();
-            TeamManager.markSyncNeeded(team);
         }
     }
 }

@@ -47,7 +47,7 @@ public class ProjectETeamCMD extends ProjectEBaseCMD {
     }
 
     @Override
-    public List addTabCompletionOptions(ICommandSender sender, String[] params) {
+    public List<String> addTabCompletionOptions(ICommandSender sender, String[] params) {
         if (params.length == 1) {
             return Lists.newArrayList(Iterables.filter(commands, new LowerCasePrefixPredicate(params[0])));
         }

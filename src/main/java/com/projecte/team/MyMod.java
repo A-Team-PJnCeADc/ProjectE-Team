@@ -39,6 +39,8 @@ public class MyMod {
         FMLCommonHandler.instance()
             .bus()
             .register(new TeamSaveHandler());
+        // 团队数据同步网络频道(S->C)
+        com.projecte.team.network.PacketHandler.register();
 
         proxy.preInit(event);
     }

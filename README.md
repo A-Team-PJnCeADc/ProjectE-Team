@@ -4,19 +4,20 @@
 
 ProjectE-Team 是经典等价交换模组 **[ProjectE](https://www.mcmod.cn/class/354.html)** 的 1.7.10 附属模组,为多人游戏添加**团队系统**:队员之间共享 EMC 与炼金术知识(转化知识),让团队协作真正成为等价交换的一部分。
 
-本模组**不修改 ProjectE 的任何源码**——通过注册 ProjectE `TransmutationProps` 的多态子类,在玩家加入团队后将 EMC/知识的读写透明地重定向到团队共享池,因此对 ProjectE 与第三方附属模组兼容性较好。
+本模组**不修改 ProjectE 的源码**——通过注册 ProjectE `TransmutationProps` 的多态子类 + 运行时 Mixin 注入,在玩家加入团队后将 EMC/知识的读写透明地重定向到团队共享池,对 ProjectE 与第三方附属模组兼容性较好。
 
 ## Progress
 
-Developing
+- [ ] 离线成员管理(按名字定位离线玩家)
 
 ## 核心机制
 
 - **团队共享**:玩家加入(创建)团队后,EMC 与炼金术知识归属团队共享池;玩家个人的 EMC/知识在加入时冻结,**离开团队后自动还原**
 - **按需开关**:EMC 共享与知识共享可分别开关(默认均开启),由队长控制
+- **实时同步**:自定义网络包(PETEAM 频道)全服务端计算——EMC 每笔操作、知识每次变更即时推送全队,成员开着转化桌也能立刻看到队友的变化,无需关闭/重开 GUI
+- **GUI 跟随**:EMC 数字实时刷新;团队 EMC 不足时,买不起的物品在知识列表/输出槽中**暂时隐藏**(仅显示层过滤,知识本身不丢失,EMC 回升后自动恢复显示)
 - **自动管理**:队长离开时队长自动转让给第一位成员;最后一人离开时团队自动解散
 - **数据持久化**:团队数据存入世界存档(WorldSavedData),重启服务器不丢失
-- **客户端零改动**:通过 ProjectE 自身的同步机制推送生效数据,客户端无需安装额外逻辑
 
 ## 游戏指令
 
@@ -38,15 +39,12 @@ Developing
 
 ## 已知限制与计划
 
-- [ ] **改用网络包同步**
-- [ ] **gui内立即同步**
 - [ ] **离线成员管理**:kick / transfer_owner 目标需在线(离线玩家无法按游戏名定位)
-
 
 ## 依赖
 
 - **Minecraft 1.7.10** / **Forge 10.13.4.1614**
-- **[ProjectE 1.7.10 (PE1.10.1)]([https://www.curseforge.com/minecraft/mc-mods/projecte](https://github.com/sinkillerj/ProjectE/tree/MC17))**
+- **[ProjectE 1.7.10 (PE1.10.1)](https://github.com/sinkillerj/ProjectE/tree/MC17)** — 构建期本地 jar(`libs/ProjectE-1.7.10-PE1.10.1.jar`),运行期需将 ProjectE 与 ProjectE-Team 的 jar 一并放入 `mods/`
 - 构建环境:Java 8+(GTNH 约定构建脚本,支持 jabel 现代语法)
 
 ## 构建与开发

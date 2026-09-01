@@ -34,8 +34,6 @@ public class TeamSaveHandler {
         if (store.isDirty()) {
             server.worldServers[0].mapStorage.saveAllData();
         }
-        // 合并广播待同步团队的数据(知识等批量写操作延迟到此处统一发送)
-        TeamManager.flushPendingSyncs();
         // 非共享玩家开着转化桌:容器 EMC 定期提交到个人 props
         // (防止不关 GUI 直接退出游戏导致 EMC 丢失;共享玩家由 mixin 实时入团队池)
         TeamManager.flushOpenTransmutationContainers();
@@ -46,6 +44,14 @@ public class TeamSaveHandler {
     public void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.player instanceof EntityPlayerMP) {
             TeamManager.commitContainerEmc((EntityPlayerMP) event.player);
+        }
+    }
+
+    /** 玩家登录后主动推送一次团队生效状态(重进时确保客户端显示团队池而非个人值) */
+    @SubscribeEvent
+    public void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
+        if (event.player instanceof EntityPlayerMP) {
+            TeamManager.syncOnLogin((EntityPlayerMP) event.player);
         }
     }
 }

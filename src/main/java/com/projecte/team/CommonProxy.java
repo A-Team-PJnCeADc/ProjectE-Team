@@ -1,5 +1,7 @@
 package com.projecte.team;
 
+import net.minecraft.nbt.NBTTagCompound;
+
 import cpw.mods.fml.common.event.FMLInitializationEvent;
 import cpw.mods.fml.common.event.FMLPostInitializationEvent;
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
@@ -24,4 +26,12 @@ public class CommonProxy {
 
     // register server commands in this event handler (Remove if not needed)
     public void serverStarting(FMLServerStartingEvent event) {}
+
+    // 网络包入口(S->C 团队数据,客户端覆写为回主线程应用)
+
+    /** 服务端收到的是 TeamEmcPKT 的发送侧,不会走到这里;客户端由 ClientProxy 覆写 */
+    public void handleTeamEmc(double emc) {}
+
+    /** 服务端收到的是 TeamKnowledgePKT 的发送侧,不会走到这里;客户端由 ClientProxy 覆写 */
+    public void handleTeamKnowledge(NBTTagCompound nbt) {}
 }
