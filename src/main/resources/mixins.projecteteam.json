@@ -1,0 +1,12 @@
+{
+    "required": true,
+    "minVersion": "0.7.11",
+    "package": "com.projecte.team.mixin",
+    "compatibilityLevel": "JAVA_8",
+    "refmap": "mixins.projecteteam.refmap.json",
+    "mixins": [
+        "TransmutationInventoryMixin"
+    ],
+    "client": [],
+    "server": []
+}

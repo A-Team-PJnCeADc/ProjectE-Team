@@ -34,5 +34,6 @@
  * For more details, see https://docs.gradle.org/8.0.1/userguide/java_library_plugin.html#sec:java_library_configurations_graph
  */
 dependencies {
-    //runtimeOnlyNonPublishable("com.github.GTNewHorizons:NotEnoughItems:2.7.69-GTNH:dev")
+    // ProjectE 1.7.10(本地 jar,编译期 + 运行期)
+    devOnlyNonPublishable(rfg.deobf(project.files("libs/ProjectE-1.7.10-PE1.10.1.jar")))
 }
