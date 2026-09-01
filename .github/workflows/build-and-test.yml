@@ -4,8 +4,26 @@ name: Build and test
 on:
   pull_request:
     branches: [ master, main ]
+    paths:
+      - 'src/**'
+      - 'build.gradle*'
+      - 'settings.gradle*'
+      - 'gradle.properties'
+      - 'gradle/**'
+      - 'dependencies.gradle'
+      - 'repositories.gradle'
+      - '.github/workflows/**'
   push:
     branches: [ master, main ]
+    paths:
+      - 'src/**'
+      - 'build.gradle*'
+      - 'settings.gradle*'
+      - 'gradle.properties'
+      - 'gradle/**'
+      - 'dependencies.gradle'
+      - 'repositories.gradle'
+      - '.github/workflows/**'
 
 jobs:
   build-and-test:
