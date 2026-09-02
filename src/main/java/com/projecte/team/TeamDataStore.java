@@ -23,6 +23,7 @@ public class TeamDataStore extends WorldSavedData {
     private final Map<UUID, TeamData> teams = Maps.newHashMap();
     private final Map<UUID, UUID> playerToTeam = Maps.newHashMap();
     private final Map<UUID, UUID> pendingInvites = Maps.newHashMap(); // invitee -> teamId
+    private final Map<UUID, String> kickNotices = Maps.newHashMap(); // 被踢玩家 -> 踢人者名(离线踢出,玩家上线时补发通知)
 
     public TeamDataStore() {
         super(NAME);
@@ -153,11 +154,29 @@ public class TeamDataStore extends WorldSavedData {
         }
     }
 
+    // 离线踢出通知(目标不在线时记录,玩家下次登录由 TeamManager.notifyOnLogin 补发)
+
+    /** 记录离线踢出通知:玩家下次登录时提示\"你被踢出了团队\" */
+    public void addKickNotice(UUID kicked, String kickerName) {
+        kickNotices.put(kicked, kickerName);
+        markDirty();
+    }
+
+    /** 取出并清除该玩家的离线踢出通知,没有则返回 null */
+    public String takeKickNotice(UUID kicked) {
+        String kickerName = kickNotices.remove(kicked);
+        if (kickerName != null) {
+            markDirty();
+        }
+        return kickerName;
+    }
+
     @Override
     public void readFromNBT(NBTTagCompound nbt) {
         teams.clear();
         playerToTeam.clear();
         pendingInvites.clear();
+        kickNotices.clear();
 
         NBTTagList teamList = nbt.getTagList("teams", Constants.NBT.TAG_COMPOUND);
         for (int i = 0; i < teamList.tagCount(); i++) {
@@ -180,6 +199,12 @@ public class TeamDataStore extends WorldSavedData {
             if (teams.containsKey(teamId)) {
                 pendingInvites.put(invitee, teamId);
             }
+        }
+
+        NBTTagList noticeList = nbt.getTagList("kickNotices", Constants.NBT.TAG_COMPOUND);
+        for (int i = 0; i < noticeList.tagCount(); i++) {
+            NBTTagCompound tag = noticeList.getCompoundTagAt(i);
+            kickNotices.put(UUID.fromString(tag.getString("uuid")), tag.getString("kicker"));
         }
     }
 
@@ -211,5 +236,17 @@ public class TeamDataStore extends WorldSavedData {
             inviteList.appendTag(tag);
         }
         nbt.setTag("pendingInvites", inviteList);
+
+        NBTTagList noticeList = new NBTTagList();
+        for (Map.Entry<UUID, String> entry : kickNotices.entrySet()) {
+            NBTTagCompound tag = new NBTTagCompound();
+            tag.setString(
+                "uuid",
+                entry.getKey()
+                    .toString());
+            tag.setString("kicker", entry.getValue());
+            noticeList.appendTag(tag);
+        }
+        nbt.setTag("kickNotices", noticeList);
     }
 }

@@ -1,5 +1,6 @@
 package com.projecte.team;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.UUID;
 
@@ -9,6 +10,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTTagList;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.management.PlayerProfileCache;
 import net.minecraft.util.ChatComponentTranslation;
 import net.minecraft.world.WorldServer;
 import net.minecraftforge.common.IExtendedEntityProperties;
@@ -17,6 +19,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import com.google.common.collect.Lists;
+import com.mojang.authlib.GameProfile;
 import com.projecte.team.network.PacketHandler;
 import com.projecte.team.network.TeamEmcPKT;
 import com.projecte.team.network.TeamKnowledgePKT;
@@ -309,6 +312,33 @@ public final class TeamManager {
         syncPlayerState(player);
     }
 
+    /**
+     * 玩家登录后补发离线期间的通知:
+     * 1. 被离线踢出 → 提示\"你被 X 踢出了团队\"(通知一次性,取走后即清除);
+     * 2. 有待处理邀请 → 提示可 accept/decline,并提醒邀请方(队长)该玩家已上线。
+     * 与 syncOnLogin 在同一登录事件中调用。
+     */
+    public static void notifyOnLogin(EntityPlayerMP player) {
+        TeamDataStore store = getStore();
+        if (store == null) {
+            return;
+        }
+        UUID playerId = player.getUniqueID();
+        String kicker = store.takeKickNotice(playerId);
+        if (kicker != null) {
+            sendMessage(player, "pe.team.notify.kicked", kicker);
+        }
+        TeamData inviteTeam = store.getPendingInviteFor(playerId);
+        if (inviteTeam != null) {
+            sendMessage(player, "pe.team.invite.notify_login", inviteTeam.getDisplayName());
+            sendMessageToMember(
+                inviteTeam,
+                inviteTeam.getOwner(),
+                "pe.team.invite.target_online",
+                player.getCommandSenderName());
+        }
+    }
+
     // 指令操作
 
     /**
@@ -348,24 +378,27 @@ public final class TeamManager {
         return null;
     }
 
-    /** 邀请玩家加入(队长无团队时自动创建团队;目标需通过 accept 确认)。返回错误消息 key,成功返回 null。 */
+    /**
+     * 邀请玩家加入(队长无团队时自动创建团队;目标不在线时也可邀请——名字解析为 UUID 后
+     * 持久化待处理邀请,对方上线时由 notifyOnLogin 补发通知;需通过 accept 确认)。
+     * 返回错误消息 key,成功返回 null。
+     */
     public static String invite(EntityPlayerMP sender, String targetName) {
         verifyProxy(sender);
-        EntityPlayerMP target = getPlayerByName(targetName);
-        if (target == null) {
-            return "pe.team.invite.notfound";
-        }
-        if (target.getUniqueID()
-            .equals(sender.getUniqueID())) {
-            return "pe.team.invite.self";
-        }
-        if (getTeam(target) != null) {
-            return "pe.team.invite.already";
-        }
-
         TeamDataStore store = getStore();
         if (store == null) {
             return "pe.team.error.noworld";
+        }
+
+        UUID targetId = resolvePlayerUUID(targetName);
+        if (targetId == null) {
+            return "pe.team.invite.notfound";
+        }
+        if (targetId.equals(sender.getUniqueID())) {
+            return "pe.team.invite.self";
+        }
+        if (store.getTeamForPlayer(targetId) != null) {
+            return "pe.team.invite.already";
         }
 
         TeamData team = store.getTeamForPlayer(sender.getUniqueID());
@@ -378,9 +411,15 @@ public final class TeamManager {
             return "pe.team.error.notowner";
         }
 
-        store.addPendingInvite(target.getUniqueID(), team.teamId);
-        sendMessage(sender, "pe.team.invite.sent", target.getCommandSenderName());
-        sendMessage(target, "pe.team.invite.notify", sender.getCommandSenderName());
+        store.addPendingInvite(targetId, team.teamId);
+        EntityPlayerMP target = getOnlinePlayer(targetId);
+        if (target != null) {
+            sendMessage(target, "pe.team.invite.notify", sender.getCommandSenderName());
+            sendMessage(sender, "pe.team.invite.sent", target.getCommandSenderName());
+        } else {
+            // 目标不在线:上线后由 notifyOnLogin 补发待处理邀请通知
+            sendMessage(sender, "pe.team.invite.sent_offline", getNameForUUID(targetId));
+        }
         return null;
     }
 
@@ -423,7 +462,7 @@ public final class TeamManager {
         return null;
     }
 
-    /** 踢出成员(仅队长)。返回错误消息 key,成功返回 null。 */
+    /** 踢出成员(仅队长;支持离线成员——被踢者不在线时记录通知,上线后补发)。返回错误消息 key,成功返回 null。 */
     public static String kick(EntityPlayerMP sender, String targetName) {
         TeamDataStore store = getStore();
         if (store == null) {
@@ -437,22 +476,28 @@ public final class TeamManager {
             return "pe.team.error.notowner";
         }
 
-        EntityPlayerMP target = getPlayerByName(targetName);
-        if (target == null) {
-            return "pe.team.kick.notonline";
+        UUID targetId = resolvePlayerUUID(targetName);
+        if (targetId == null) {
+            return "pe.team.kick.notfound";
         }
-        if (target.getUniqueID()
-            .equals(sender.getUniqueID())) {
+        if (targetId.equals(sender.getUniqueID())) {
             return "pe.team.kick.self";
         }
-        if (!team.isMember(target.getUniqueID())) {
+        if (!team.isMember(targetId)) {
             return "pe.team.kick.notmember";
         }
 
-        store.removeMember(team, target.getUniqueID());
-        store.removePendingInvite(target.getUniqueID());
-        syncPlayerState(target);
-        sendMessage(target, "pe.team.notify.kicked", sender.getCommandSenderName());
+        store.removeMember(team, targetId);
+        store.removePendingInvite(targetId);
+        EntityPlayerMP target = getOnlinePlayer(targetId);
+        if (target != null) {
+            syncPlayerState(target);
+            sendMessage(target, "pe.team.notify.kicked", sender.getCommandSenderName());
+        } else {
+            // 离线踢出:立即移出团队,记录通知待对方下次登录时补发
+            store.addKickNotice(targetId, sender.getCommandSenderName());
+            sendMessage(sender, "pe.team.kick.success_offline", getNameForUUID(targetId));
+        }
         return null;
     }
 
@@ -621,12 +666,121 @@ public final class TeamManager {
         return null;
     }
 
-    /** 显示名:优先在线玩家名,否则取 UUID 前 8 位 */
+    /** 显示名:优先在线玩家名,否则玩家档案缓存(usercache.json)中的注册名,最后回退 UUID 前 8 位 */
     private static String getNameForUUID(UUID uuid) {
         EntityPlayerMP player = getOnlinePlayer(uuid);
-        return player != null ? player.getCommandSenderName()
-            : uuid.toString()
-                .substring(0, 8);
+        if (player != null) {
+            return player.getCommandSenderName();
+        }
+        try {
+            PlayerProfileCache cache = getProfileCache();
+            if (cache != null) {
+                GameProfile profile = cache.func_152652_a(uuid); // 纯内存查询(usercache.json 启动时加载),无网络
+                if (profile != null && profile.getName() != null) {
+                    return profile.getName();
+                }
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to resolve name for {}: {}", uuid, e.getMessage());
+        }
+        return uuid.toString()
+            .substring(0, 8);
+    }
+
+    /**
+     * 按玩家名解析 UUID(支持离线目标,invite/kick 用)。
+     * 解析顺序:
+     * 1. 在线玩家(忽略大小写);
+     * 2. 玩家档案缓存(usercache.json,覆盖所有曾登录本服务器的玩家):缓存命中无网络开销,
+     * 且返回玩家真实注册 UUID(注意 1.7.10 世界存档里没有名字索引,这是唯一离线名字来源);
+     * 3. 在线模式且缓存未命中:func_152655_a 内部走一次 Mojang 会话查询(可邀请从未上过线的正版玩家);
+     * 离线模式且缓存未命中:不查网络,按 "OfflinePlayer:" + 名字确定性生成
+     * (与登录时 EntityPlayer.func_146094_a 同算法,名字须与登录时完全一致)。
+     */
+    public static UUID resolvePlayerUUID(String name) {
+        MinecraftServer server = MinecraftServer.getServer();
+        if (server == null || name == null || name.isEmpty()) {
+            return null;
+        }
+        EntityPlayerMP online = getPlayerByName(name);
+        if (online != null) {
+            return online.getUniqueID();
+        }
+        boolean onlineMode = server.isServerInOnlineMode();
+        try {
+            PlayerProfileCache cache = getProfileCache();
+            if (cache != null) {
+                // 缓存命中必调(无网络);在线模式下未命中也调(内部走 Mojang 查询)
+                if (containsIgnoreCase(cache.func_152654_a(), name) || onlineMode) {
+                    GameProfile profile = cache.func_152655_a(name);
+                    if (profile != null && profile.getId() != null) {
+                        return profile.getId();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to look up profile for {}: {}", name, e.getMessage());
+        }
+        if (!onlineMode) {
+            // 离线模式:名字 -> 确定性 UUID(该模式登录 UUID 就是按此算法生成的)
+            return UUID.nameUUIDFromBytes(("OfflinePlayer:" + name).getBytes(StandardCharsets.UTF_8));
+        }
+        return null;
+    }
+
+    /** 玩家档案缓存(usercache.json;服务端启动时加载,玩家每次登录时刷新);取不到返回 null */
+    private static PlayerProfileCache getProfileCache() {
+        MinecraftServer server = MinecraftServer.getServer();
+        if (server == null) {
+            return null;
+        }
+        try {
+            return server.func_152358_ax();
+        } catch (Exception e) {
+            LOG.warn("Failed to access player profile cache: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /** 已知玩家名:在线玩家 + 档案缓存中的名字(含离线玩家;供 invite/kick 的 Tab 补全) */
+    public static List<String> getKnownPlayerNames() {
+        List<String> names = Lists.newArrayList();
+        MinecraftServer server = MinecraftServer.getServer();
+        if (server == null) {
+            return names;
+        }
+        for (Object o : server.getConfigurationManager().playerEntityList) {
+            if (o instanceof EntityPlayerMP) {
+                names.add(((EntityPlayerMP) o).getCommandSenderName());
+            }
+        }
+        PlayerProfileCache cache = getProfileCache();
+        if (cache != null) {
+            for (String cachedName : cache.func_152654_a()) {
+                if (!containsIgnoreCase(names, cachedName)) {
+                    names.add(cachedName);
+                }
+            }
+        }
+        return names;
+    }
+
+    private static boolean containsIgnoreCase(List<String> names, String candidate) {
+        for (String name : names) {
+            if (name.equalsIgnoreCase(candidate)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsIgnoreCase(String[] names, String candidate) {
+        for (String name : names) {
+            if (name.equalsIgnoreCase(candidate)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void sendMessage(EntityPlayerMP player, String key, Object... args) {

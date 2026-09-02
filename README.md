@@ -8,7 +8,9 @@ ProjectE-Team 是经典等价交换模组 **[ProjectE](https://www.mcmod.cn/clas
 
 ## Progress
 
-- [ ] 离线成员管理(按名字定位离线玩家)
+- [x] 核心团队功能:创建 / 邀请 / 接受 / 拒绝 / 踢出 / 离开 / 转让 / 设置
+- [x] 团队 EMC 与知识实时共享、即时持久化(存档不丢)
+- [x] 离线成员管理:支持邀请与踢出**离线玩家**,通知在对方上线后补发
 
 ## 核心机制
 
@@ -16,6 +18,7 @@ ProjectE-Team 是经典等价交换模组 **[ProjectE](https://www.mcmod.cn/clas
 - **按需开关**:EMC 共享与知识共享可分别开关(默认均开启),由队长控制
 - **实时同步**:自定义网络包(PETEAM 频道)全服务端计算——EMC 每笔操作、知识每次变更即时推送全队,成员开着转化桌也能立刻看到队友的变化,无需关闭/重开 GUI
 - **GUI 跟随**:EMC 数字实时刷新;团队 EMC 不足时,买不起的物品在知识列表/输出槽中**暂时隐藏**(仅显示层过滤,知识本身不丢失,EMC 回升后自动恢复显示)
+- **离线成员管理**:可邀请 / 踢出不在线的玩家——离线操作产生的通知(被踢提醒、待处理邀请提醒)在对方**下次登录时自动补发**,邀请方也会收到"对方已上线"提示;`members` 可查看离线成员真实游戏名
 - **自动管理**:队长离开时队长自动转让给第一位成员;最后一人离开时团队自动解散
 - **数据持久化**:团队数据存入世界存档(WorldSavedData),重启服务器不丢失
 
@@ -25,11 +28,11 @@ ProjectE-Team 是经典等价交换模组 **[ProjectE](https://www.mcmod.cn/clas
 
 - `/projecte_team` — 显示指令帮助
 - `/projecte_team create [名字]` — 创建团队并命名(缺省时默认 `<玩家名> team`)
-- `/projecte_team invite <玩家>` — 邀请玩家加入团队(无团队时自动创建,需对方确认)
+- `/projecte_team invite <玩家>` — 邀请玩家加入团队(支持离线玩家,上线后收到通知;无团队时自动创建,需对方确认)
 - `/projecte_team accept` — 接受待处理的团队邀请
 - `/projecte_team decline` — 拒绝待处理的团队邀请
 - `/projecte_team members` — 列出团队成员(标记队长与离线成员)
-- `/projecte_team kick <玩家>` — 踢出成员(仅队长)
+- `/projecte_team kick <玩家>` — 踢出成员(仅队长;支持离线成员,对方上线后收到通知)
 - `/projecte_team leave` — 离开团队(队长离开时自动转让/解散)
 - `/projecte_team transfer_owner <玩家>` — 转让队长(仅队长)
 - `/projecte_team settings share_emc <true|false>` — 设置 EMC 共享(默认: true)
@@ -39,7 +42,8 @@ ProjectE-Team 是经典等价交换模组 **[ProjectE](https://www.mcmod.cn/clas
 
 ## 已知限制与计划
 
-- [ ] **离线成员管理**:kick / transfer_owner 目标需在线(离线玩家无法按游戏名定位)
+- **transfer_owner 需目标在线**:队长转让要求对方为**在线成员**
+- **离线玩家按名字定位**:依赖服务端玩家档案缓存(usercache.json);正版服务器对从未上过线的名字会走 Mojang 查询,离线模式服务器则按名字确定性生成 UUID(名字需与登录时完全一致)
 
 ## 依赖
 
@@ -54,10 +58,13 @@ ProjectE-Team 是经典等价交换模组 **[ProjectE](https://www.mcmod.cn/clas
 git clone git@github.com:A-Team-PJnCeADc/ProjectE-Team.git
 cd ProjectE-Team
 
+# 首次构建
+./gradlew setupDecompWorkspace
+
 # 构建模组
 ./gradlew build
 
-# 运行客户端(需先安装 ProjectE)
+# 运行客户端
 ./gradlew runClient
 ```
 

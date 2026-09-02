@@ -47,11 +47,12 @@ public class TeamSaveHandler {
         }
     }
 
-    /** 玩家登录后主动推送一次团队生效状态(重进时确保客户端显示团队池而非个人值) */
+    /** 玩家登录后主动推送一次团队生效状态,并补发离线期间的通知(被离线踢出/待处理邀请) */
     @SubscribeEvent
     public void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.player instanceof EntityPlayerMP) {
             TeamManager.syncOnLogin((EntityPlayerMP) event.player);
+            TeamManager.notifyOnLogin((EntityPlayerMP) event.player);
         }
     }
 }

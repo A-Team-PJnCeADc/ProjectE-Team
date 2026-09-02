@@ -51,8 +51,11 @@ public class ProjectETeamCMD extends ProjectEBaseCMD {
         if (params.length == 1) {
             return Lists.newArrayList(Iterables.filter(commands, new LowerCasePrefixPredicate(params[0])));
         }
-        if (params.length == 2 && ("invite".equalsIgnoreCase(params[0]) || "kick".equalsIgnoreCase(params[0])
-            || "transfer_owner".equalsIgnoreCase(params[0]))) {
+        if (params.length == 2 && ("invite".equalsIgnoreCase(params[0]) || "kick".equalsIgnoreCase(params[0]))) {
+            // 离线成员管理:补全范围包含曾在本服务器登录过的离线玩家
+            return TeamManager.getKnownPlayerNames();
+        }
+        if (params.length == 2 && "transfer_owner".equalsIgnoreCase(params[0])) {
             return getOnlinePlayerNames();
         }
         if (params.length == 3 && "settings".equalsIgnoreCase(params[0])) {
