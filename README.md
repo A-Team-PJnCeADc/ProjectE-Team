@@ -2,7 +2,7 @@
 
 > "一个人的 EMC 终会枯竭,但一个团队的传承永不消逝。"
 
-ProjectE-Team 是经典等价交换模组 **[ProjectE](https://www.mcmod.cn/class/354.html)** 的 1.7.10 附属模组,为多人游戏添加**团队系统**:队员之间共享 EMC 与炼金术知识(转化知识),让团队协作真正成为等价交换的一部分。
+ProjectE-Team 是经典等价交换模组 **[ProjectE](https://github.com/sinkillerj/ProjectE/tree/MC17)** 的 1.7.10 附属模组,为多人游戏添加**团队系统**:队员之间共享 EMC 与炼金术知识(转化知识),让团队协作真正成为等价交换的一部分。
 
 本模组**不修改 ProjectE 的源码**——通过注册 ProjectE `TransmutationProps` 的多态子类 + 运行时 Mixin 注入,在玩家加入团队后将 EMC/知识的读写透明地重定向到团队共享池,对 ProjectE 与第三方附属模组兼容性较好。
 
@@ -48,7 +48,7 @@ ProjectE-Team 是经典等价交换模组 **[ProjectE](https://www.mcmod.cn/clas
 ## 依赖
 
 - **Minecraft 1.7.10** / **Forge 10.13.4.1614**
-- **[ProjectE 1.7.10 (PE1.10.1)](https://github.com/sinkillerj/ProjectE/tree/MC17)** — 构建期本地 jar(`libs/ProjectE-1.7.10-PE1.10.1.jar`),运行期需将 ProjectE 与 ProjectE-Team 的 jar 一并放入 `mods/`
+- **[ProjectE 1.7.10](https://github.com/sinkillerj/ProjectE/tree/MC17)** — 构建期本地 jar(`libs/ProjectE-1.7.10-PE1.10.1.jar`),运行期需将 ProjectE 与 ProjectE-Team 的 jar 一并放入 `mods/`
 - 构建环境:Java 8+(GTNH 约定构建脚本,支持 jabel 现代语法)
 
 ## 构建与开发
