@@ -5,7 +5,8 @@
     "compatibilityLevel": "JAVA_8",
     "refmap": "mixins.projecteteam.refmap.json",
     "mixins": [
-        "TransmutationInventoryMixin"
+        "TransmutationInventoryMixin",
+        "ItemSearchHelperMixin"
     ],
     "client": [],
     "server": []
