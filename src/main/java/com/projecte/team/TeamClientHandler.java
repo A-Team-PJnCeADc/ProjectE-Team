@@ -37,6 +37,7 @@ public class TeamClientHandler {
             TeamClientSync.clearPending();
             return;
         }
+        TeamClientSync.clientTick();
         TeamClientSync.applyPending();
     }
 }

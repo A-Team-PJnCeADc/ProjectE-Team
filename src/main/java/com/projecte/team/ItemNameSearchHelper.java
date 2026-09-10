@@ -23,6 +23,11 @@ public class ItemNameSearchHelper extends ItemSearchHelper {
 
     @Override
     protected boolean doesItemMatchFilter_(ItemStack stack) {
+        // 无搜索词时直接放行:默认实现也会先算显示名(StatCollector 翻译 + 字符串分配),
+        // 而 GUI 每次重建(EMC/知识同步、翻页、开桌)都会对整张知识表跑一遍过滤
+        if (searchString.isEmpty()) {
+            return true;
+        }
         String displayName;
         try {
             displayName = stack.getDisplayName()
@@ -34,6 +39,6 @@ public class ItemNameSearchHelper extends ItemSearchHelper {
         if (displayName == null) {
             return false;
         }
-        return searchString.length() == 0 || displayName.contains(searchString);
+        return displayName.contains(searchString);
     }
 }

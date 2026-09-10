@@ -13,8 +13,13 @@ import cpw.mods.fml.common.gameevent.TickEvent;
  */
 public class TeamSaveHandler {
 
-    /** 每 5 tick(约 250ms)检查一次 */
-    private static final int CHECK_INTERVAL = 5;
+    /**
+     * 每 20 tick(约 1 秒)检查一次。写盘要点:一次落盘会把整张团队知识表序列化成 NBT 并 gzip 压缩
+     * 写文件(知识上千条时要数毫秒),而转化桌里的每一次 EMC 增减都会把数据标脏,所以间隔太短
+     * (例如 5 tick = 250ms)会在连续买卖时形成持续的 I/O + 压缩压力,表现为界面卡顿。
+     * 1 秒的持久化延迟对"即时落盘"的语义没有影响。
+     */
+    private static final int CHECK_INTERVAL = 20;
 
     private int tickCounter = 0;
 

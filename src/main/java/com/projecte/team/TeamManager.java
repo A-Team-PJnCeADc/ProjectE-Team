@@ -143,17 +143,14 @@ public final class TeamManager {
     /**
      * 返回团队共享知识列表。调用方(ProjectE 的 Transmutation)会直接对该列表
      * 执行 add/remove/clear,因此每次读取时标记脏数据,保证修改能被持久化。
+     * 过期知识清理是全表扫描(每条一次 EMC 查询),这里做秒级节流,避免每次读知识都扫一遍。
      */
     public static List<ItemStack> getTeamKnowledge(EntityPlayer player) {
         TeamData team = getTeam(player);
         if (team == null) {
             return Lists.newArrayList();
         }
-        int sizeBefore = team.getKnowledge()
-            .size();
-        team.pruneStaleKnowledge();
-        if (team.getKnowledge()
-            .size() != sizeBefore) {
+        if (team.pruneStaleKnowledgeIfDue(System.currentTimeMillis())) {
             markDirty();
         }
         // 活视图:写操作(add/remove/clear)会立即标记脏数据,由 TeamSaveHandler 即时落盘
@@ -277,16 +274,20 @@ public final class TeamManager {
         if (team == null || MinecraftServer.getServer() == null) {
             return;
         }
-        syncKnowledgeToMember(team, team.getOwner());
+        // 共享知识时所有成员的载荷内容相同:只序列化一次,避免按成员数重复把整张知识表写成 NBT
+        NBTTagCompound sharedPayload = team.isShareKnowledge() ? buildKnowledgePayload(team.getKnowledge()) : null;
+        syncKnowledgeToMember(team, team.getOwner(), sharedPayload);
         for (UUID member : team.getMembers()) {
-            syncKnowledgeToMember(team, member);
+            syncKnowledgeToMember(team, member, sharedPayload);
         }
     }
 
-    private static void syncKnowledgeToMember(TeamData team, UUID uuid) {
+    private static void syncKnowledgeToMember(TeamData team, UUID uuid, NBTTagCompound sharedPayload) {
         EntityPlayerMP player = getOnlinePlayer(uuid);
         if (player != null) {
-            PacketHandler.sendTo(player, new TeamKnowledgePKT(buildKnowledgePayload(getEffectiveKnowledge(player))));
+            NBTTagCompound payload = sharedPayload != null ? sharedPayload
+                : buildKnowledgePayload(getEffectiveKnowledge(player));
+            PacketHandler.sendTo(player, new TeamKnowledgePKT(payload));
         }
     }
 

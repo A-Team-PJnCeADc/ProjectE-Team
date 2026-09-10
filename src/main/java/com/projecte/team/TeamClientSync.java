@@ -41,6 +41,18 @@ public final class TeamClientSync {
     private static volatile NBTTagCompound pendingKnowledge;
     private static volatile boolean hasPendingKnowledge;
 
+    /**
+     * 输出槽重建的最小间隔(客户端 tick)。一次买入/卖出会在同一批里连发多个 EMC 包
+     * (shift-click 一整叠最多 64 笔),而每次重建都要遍历并排序整个知识表——团队模式下知识
+     * 是全队并集(常常上千条),逐个包重建会把客户端主线程拖到卡顿。这里把同一个间隔内的
+     * 重建请求合并成一次:EMC 数字本身仍然即时刷新(直接写 inv.emc),只有"哪些物品买得起"
+     * 的过滤视图最多延迟 1 个间隔(约 200ms)。
+     */
+    private static final int REBUILD_COOLDOWN_TICKS = 4;
+
+    private static volatile boolean pendingRebuild;
+    private static int rebuildCooldown;
+
     private TeamClientSync() {}
 
     /** 网络包入口(任意线程):排队最新 EMC 生效值 */
@@ -67,10 +79,24 @@ public final class TeamClientSync {
         }
     }
 
+    /** 主线程 tick 调用:推进重建冷却并执行被合并的输出槽重建请求 */
+    public static void clientTick() {
+        if (rebuildCooldown > 0) {
+            --rebuildCooldown;
+        }
+        if (pendingRebuild && rebuildCooldown <= 0) {
+            pendingRebuild = false;
+            rebuildOutputs();
+            rebuildCooldown = REBUILD_COOLDOWN_TICKS;
+        }
+    }
+
     /** 玩家实体变化(登出/进服/换维度)时清空排队数据,避免旧会话的过期值覆盖新实体上已同步的 props */
     public static void clearPending() {
         hasPendingEmc = false;
         hasPendingKnowledge = false;
+        pendingRebuild = false;
+        rebuildCooldown = 0;
     }
 
     private static void applyEmc(double emc) {
@@ -88,7 +114,7 @@ public final class TeamClientSync {
                 // (updateOutputs 只做显示层过滤,不动 props/团队知识——隐藏不是忘记;
                 // 无锁时按容器 emc 过滤,有锁时按锁价值过滤,锁价值 > emc 时输出清空,
                 // 均为 ProjectE vanilla 语义;EMC 回升后再次重建即恢复显示)
-                inv.updateOutputs();
+                requestOutputsRebuild();
             }
         }
     }
@@ -107,11 +133,26 @@ public final class TeamClientSync {
             }
         }
         writeKnowledge(player, knowledge);
+        // updateOutputs 从 props 重新读取知识并重建输出槽(仅客户端有效)
+        requestOutputsRebuild();
+    }
 
-        if (player.openContainer instanceof TransmutationContainer) {
+    /** 重建请求:距上次重建已超过冷却间隔则立即重建,否则合并到冷却到期时的那一次 */
+    private static void requestOutputsRebuild() {
+        if (rebuildCooldown <= 0) {
+            rebuildOutputs();
+            rebuildCooldown = REBUILD_COOLDOWN_TICKS;
+        } else {
+            pendingRebuild = true;
+        }
+    }
+
+    /** 重建打开着的转化桌输出槽(GUI 每帧直接读容器字段,重建后立即反映) */
+    private static void rebuildOutputs() {
+        EntityPlayer player = Minecraft.getMinecraft().thePlayer;
+        if (player != null && player.openContainer instanceof TransmutationContainer) {
             TransmutationInventory inv = ((TransmutationContainer) player.openContainer).transmutationInventory;
             if (inv != null) {
-                // updateOutputs 从 props 重新读取知识并重建输出槽(仅客户端有效)
                 inv.updateOutputs();
             }
         }
