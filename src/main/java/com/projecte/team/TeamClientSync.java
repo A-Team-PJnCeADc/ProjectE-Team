@@ -1,5 +1,6 @@
 package com.projecte.team;
 
+import java.math.BigInteger;
 import java.util.List;
 
 import net.minecraft.client.Minecraft;
@@ -37,7 +38,14 @@ public final class TeamClientSync {
 
     // 待应用状态(Netty 线程写,主线程 tick 读+清;volatile 保证可见性)
     private static volatile double pendingEmc;
+    private static volatile String pendingEmcBig;
     private static volatile boolean hasPendingEmc;
+
+    /**
+     * big 模式(装了 PE-E-GTNH)下服务端推来的**精确**团队 EMC。
+     * null = 非 big 模式 / 还没收到 / 已登出,调用方应回退到 double 视图。
+     */
+    private static volatile BigInteger teamEmcBig;
     private static volatile NBTTagCompound pendingKnowledge;
     private static volatile boolean hasPendingKnowledge;
 
@@ -55,10 +63,19 @@ public final class TeamClientSync {
 
     private TeamClientSync() {}
 
-    /** 网络包入口(任意线程):排队最新 EMC 生效值 */
-    public static void queueEmc(double emc) {
+    /** 网络包入口(任意线程):排队最新 EMC 生效值(double 视图 + big 模式的精确十进制字符串) */
+    public static void queueEmc(double emc, String emcBig) {
         pendingEmc = emc;
+        pendingEmcBig = emcBig;
         hasPendingEmc = true;
+    }
+
+    /**
+     * @return 精确的团队 EMC(仅 big 模式且已收到同步);null 表示应回退到 double 视图。
+     *         PE-E-GTNH 的转化桌 GUI 文本通过反射读这里,显示才能超过 double 精度。
+     */
+    public static BigInteger getTeamEmcBig() {
+        return teamEmcBig;
     }
 
     /** 网络包入口(任意线程):排队最新知识全量列表 */
@@ -71,7 +88,7 @@ public final class TeamClientSync {
     public static void applyPending() {
         if (hasPendingEmc) {
             hasPendingEmc = false;
-            applyEmc(pendingEmc);
+            applyEmc(pendingEmc, pendingEmcBig);
         }
         if (hasPendingKnowledge) {
             hasPendingKnowledge = false;
@@ -93,13 +110,28 @@ public final class TeamClientSync {
 
     /** 玩家实体变化(登出/进服/换维度)时清空排队数据,避免旧会话的过期值覆盖新实体上已同步的 props */
     public static void clearPending() {
+        teamEmcBig = null;
+        pendingEmcBig = null;
         hasPendingEmc = false;
         hasPendingKnowledge = false;
         pendingRebuild = false;
         rebuildCooldown = 0;
     }
 
-    private static void applyEmc(double emc) {
+    /** 解析十进制字符串;空/null/非法一律返回 null(表示回退 double 视图)。 */
+    private static BigInteger parseBig(String text) {
+        if (text == null || text.isEmpty()) {
+            return null;
+        }
+        try {
+            return new BigInteger(text);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static void applyEmc(double emc, String emcBig) {
+        teamEmcBig = parseBig(emcBig);
         EntityPlayer player = Minecraft.getMinecraft().thePlayer;
         if (player == null) {
             return;

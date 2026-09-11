@@ -1,5 +1,6 @@
 package com.projecte.team;
 
+import java.math.BigInteger;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
@@ -35,6 +36,8 @@ public class TeamData {
     private boolean shareEMC = true;
     private boolean shareKnowledge = true;
     private double emc;
+    /** big 模式下的权威值(装了 PE-E-GTNH 时不限制上限);未装时与 emc 保持同步。 */
+    private BigInteger emcBig = BigInteger.ZERO;
     private final List<ItemStack> knowledge = Lists.newArrayList();
     private long lastStalePruneAt;
 
@@ -98,8 +101,24 @@ public class TeamData {
         return emc;
     }
 
+    /**
+     * 兼容入口(double 视图):非 big 模式由 TeamManager 直接使用;big 模式下它只是
+     * {@link #getEmcBig()} 的近似视图,权威值是 BigInteger 池。
+     */
     public void setEmc(double emc) {
         this.emc = emc;
+        this.emcBig = TeamEmcMode.fromDouble(emc);
+    }
+
+    /** big 模式(装了 PE-E-GTNH)下的权威 EMC。 */
+    public BigInteger getEmcBig() {
+        return emcBig;
+    }
+
+    /** 写入 BigInteger 池,并同步 double 视图(供 ProjectE 的 double 接口读取)。 */
+    public void setEmcBig(BigInteger value) {
+        this.emcBig = value == null || value.signum() < 0 ? BigInteger.ZERO : value;
+        this.emc = TeamEmcMode.toDouble(this.emcBig);
     }
 
     public List<ItemStack> getKnowledge() {
@@ -114,6 +133,10 @@ public class TeamData {
         compound.setBoolean("shareEMC", shareEMC);
         compound.setBoolean("shareKnowledge", shareKnowledge);
         compound.setDouble("emc", emc);
+        if (TeamEmcMode.isBigIntegerMode()) {
+            // 精确值以十进制字符串持久化(旧存档没有这个键时回退读 emc)
+            compound.setString("emcBig", emcBig.toString());
+        }
 
         NBTTagList memberList = new NBTTagList();
         for (UUID uuid : members) {
@@ -139,7 +162,16 @@ public class TeamData {
         data.name = compound.getString("name");
         data.shareEMC = compound.getBoolean("shareEMC");
         data.shareKnowledge = compound.getBoolean("shareKnowledge");
-        data.emc = compound.getDouble("emc");
+        // big 模式下优先取精确值;旧存档/非 big 模式回退到 double
+        if (compound.hasKey("emcBig")) {
+            try {
+                data.setEmcBig(new BigInteger(compound.getString("emcBig")));
+            } catch (NumberFormatException e) {
+                data.setEmc(compound.getDouble("emc"));
+            }
+        } else {
+            data.setEmc(compound.getDouble("emc"));
+        }
 
         NBTTagList memberList = compound.getTagList("members", Constants.NBT.TAG_COMPOUND);
         for (int i = 0; i < memberList.tagCount(); i++) {

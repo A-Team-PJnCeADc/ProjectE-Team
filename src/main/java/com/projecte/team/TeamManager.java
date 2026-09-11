@@ -100,10 +100,43 @@ public final class TeamManager {
     public static void onEmcAdd(EntityPlayer player, double value) {
         TeamData team = getTeam(player);
         if (team != null && team.isShareEMC()) {
-            team.setEmc(Math.min(Constants.TILE_MAX_EMC, Math.max(0, team.getEmc() + value)));
+            if (TeamEmcMode.isBigIntegerMode()) {
+                // 装了 PE-E-GTNH:BigInteger 池,不限制上限(精确累加)
+                team.setEmcBig(
+                    team.getEmcBig()
+                        .add(TeamEmcMode.fromDouble(value)));
+            } else {
+                team.setEmc(Math.min(Constants.TILE_MAX_EMC, Math.max(0, team.getEmc() + value)));
+            }
             markDirty();
             syncTeamEmc(team);
         }
+    }
+
+    /**
+     * big 模式(装了 PE-E-GTNH)下的团队 EMC 精确值;未装时回退到 double 视图。
+     * PE-E-GTNH 通过反射调用它来按精确值记账。
+     */
+    public static java.math.BigInteger getTeamEmcBig(EntityPlayer player) {
+        TeamData team = getTeam(player);
+        return team == null ? java.math.BigInteger.ZERO : team.getEmcBig();
+    }
+
+    /** big 模式下的精确写入(增量,负数为扣除);返回 false 表示当前不是 big 模式。 */
+    public static boolean addTeamEmcBig(EntityPlayer player, java.math.BigInteger delta) {
+        if (!TeamEmcMode.isBigIntegerMode() || delta == null || delta.signum() == 0) {
+            return false;
+        }
+        TeamData team = getTeam(player);
+        if (team == null || !team.isShareEMC()) {
+            return false;
+        }
+        java.math.BigInteger updated = team.getEmcBig()
+            .add(delta);
+        team.setEmcBig(updated.signum() < 0 ? java.math.BigInteger.ZERO : updated);
+        markDirty();
+        syncTeamEmc(team);
+        return true;
     }
 
     /**
@@ -113,7 +146,13 @@ public final class TeamManager {
     public static void onEmcRemove(EntityPlayer player, double value) {
         TeamData team = getTeam(player);
         if (team != null && team.isShareEMC()) {
-            team.setEmc(Math.max(0, team.getEmc() - value));
+            if (TeamEmcMode.isBigIntegerMode()) {
+                java.math.BigInteger updated = team.getEmcBig()
+                    .subtract(TeamEmcMode.fromDouble(value));
+                team.setEmcBig(updated.signum() < 0 ? java.math.BigInteger.ZERO : updated);
+            } else {
+                team.setEmc(Math.max(0, team.getEmc() - value));
+            }
             markDirty();
             syncTeamEmc(team);
         }
@@ -133,7 +172,11 @@ public final class TeamManager {
             syncTeamEmc(team);
             return;
         }
-        team.setEmc(Math.max(0, emc));
+        if (TeamEmcMode.isBigIntegerMode()) {
+            team.setEmcBig(TeamEmcMode.fromDouble(Math.max(0, emc)));
+        } else {
+            team.setEmc(Math.max(0, emc));
+        }
         markDirty();
         syncTeamEmc(team);
     }
@@ -259,7 +302,12 @@ public final class TeamManager {
     private static void syncEmcToMember(TeamData team, UUID uuid) {
         EntityPlayerMP player = getOnlinePlayer(uuid);
         if (player != null) {
-            PacketHandler.sendTo(player, new TeamEmcPKT(getEffectiveEmc(player)));
+            PacketHandler.sendTo(
+                player,
+                new TeamEmcPKT(
+                    getEffectiveEmc(player),
+                    team.isShareEMC() && TeamEmcMode.isBigIntegerMode() ? team.getEmcBig()
+                        .toString() : null));
             if (team.isShareEMC() && player.openContainer instanceof TransmutationContainer) {
                 TransmutationInventory inv = ((TransmutationContainer) player.openContainer).transmutationInventory;
                 if (inv != null) {
@@ -299,13 +347,19 @@ public final class TeamManager {
 
     /** 向单个玩家推送完整生效状态(加入/离开/创建等个人↔团队模式切换时用,替代旧 Transmutation.sync) */
     private static void syncPlayerState(EntityPlayerMP player) {
-        PacketHandler.sendTo(player, new TeamEmcPKT(getEffectiveEmc(player)));
+        TeamData team = getTeam(player);
+        PacketHandler.sendTo(
+            player,
+            new TeamEmcPKT(
+                getEffectiveEmc(player),
+                team != null && team.isShareEMC() && TeamEmcMode.isBigIntegerMode() ? team.getEmcBig()
+                    .toString() : null));
         PacketHandler.sendTo(player, new TeamKnowledgePKT(buildKnowledgePayload(getEffectiveKnowledge(player))));
     }
 
     /**
      * 玩家登录后主动推送一次当前生效状态(团队共享则团队池,否则个人字段)。
-     * 背景:ProjectE 的登录同步(onEntityJoinWorld → Transmutation.sync → saveForPacket)依赖
+     * 背景:ProjectE 的登录同步(onEntityJoinWorld -> Transmutation.sync -> saveForPacket)依赖
      * 那一刻 isSharingEMC 的判断,任何时序偏差都会让客户端收到个人值;这里在 PlayerLoggedInEvent
      * (实体入世界之后)再推一次,保证重进后显示的一定是团队池(或正确的个人值)。
      */
@@ -315,8 +369,8 @@ public final class TeamManager {
 
     /**
      * 玩家登录后补发离线期间的通知:
-     * 1. 被离线踢出 → 提示\"你被 X 踢出了团队\"(通知一次性,取走后即清除);
-     * 2. 有待处理邀请 → 提示可 accept/decline,并提醒邀请方(队长)该玩家已上线。
+     * 1. 被离线踢出 -> 提示\"你被 X 踢出了团队\"(通知一次性,取走后即清除);
+     * 2. 有待处理邀请 -> 提示可 accept/decline,并提醒邀请方(队长)该玩家已上线。
      * 与 syncOnLogin 在同一登录事件中调用。
      */
     public static void notifyOnLogin(EntityPlayerMP player) {

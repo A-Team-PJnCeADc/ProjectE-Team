@@ -30,7 +30,7 @@ public class CommonProxy {
     // 网络包入口(S->C 团队数据,客户端覆写为回主线程应用)
 
     /** 服务端收到的是 TeamEmcPKT 的发送侧,不会走到这里;客户端由 ClientProxy 覆写 */
-    public void handleTeamEmc(double emc) {}
+    public void handleTeamEmc(double emc, String emcBig) {}
 
     /** 服务端收到的是 TeamKnowledgePKT 的发送侧,不会走到这里;客户端由 ClientProxy 覆写 */
     public void handleTeamKnowledge(NBTTagCompound nbt) {}

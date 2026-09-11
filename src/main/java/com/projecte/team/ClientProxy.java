@@ -23,8 +23,8 @@ public class ClientProxy extends CommonProxy {
     // 网络包入口:Netty IO 线程收到,只做 volatile 排队,主线程 tick 应用
 
     @Override
-    public void handleTeamEmc(double emc) {
-        TeamClientSync.queueEmc(emc);
+    public void handleTeamEmc(double emc, String emcBig) {
+        TeamClientSync.queueEmc(emc, emcBig);
     }
 
     @Override
